@@ -1,0 +1,187 @@
+[
+  {
+    "id": "eval_01",
+    "query": "What is the safe moisture content percentage for storing maize seed?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_009"
+    ],
+    "difficulty": "keyword-easy",
+    "note": "Direct table lookup (Maize = 13% max per FAO Quality Declared Seed Standards)."
+  },
+  {
+    "id": "eval_02",
+    "query": "How can a farmer tell if grain is dry enough without a moisture meter?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_006"
+    ],
+    "difficulty": "keyword-easy",
+    "note": "Biting/pinching grain, salt-in-jar test."
+  },
+  {
+    "id": "eval_03",
+    "query": "What temperature range lets storage insects thrive?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_005"
+    ],
+    "difficulty": "keyword-easy"
+  },
+  {
+    "id": "eval_04",
+    "query": "Which insect leaves round holes in maize cobs and can destroy up to 30 percent of stored maize?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_011"
+    ],
+    "difficulty": "semantic-medium",
+    "note": "Larger grain borer \u2014 question paraphrases the damage description, doesn't name the species."
+  },
+  {
+    "id": "eval_05",
+    "query": "What natural, non-chemical insecticides can small-scale farmers use instead of synthetic pesticides?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_024"
+    ],
+    "difficulty": "keyword-easy",
+    "note": "Neem, wood ash, mineral dusts, vegetable oils."
+  },
+  {
+    "id": "eval_06",
+    "query": "According to Section 2 of the indexed FAO manual, what are the exact steps to seal a plastic storage container to prevent insect infestations?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_054",
+      "fao_047",
+      "fao_052"
+    ],
+    "difficulty": "semantic-hard",
+    "note": "Mandatory Prompt 1. Multi-hop: correct sealing method (candle wax on jars/tins) plus the caveat that plastic BAGS specifically are unsuitable. This is the known failure case."
+  },
+  {
+    "id": "eval_07",
+    "query": "How does a hermetic bag actually kill storage pests without any chemicals?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_051"
+    ],
+    "difficulty": "semantic-medium",
+    "note": "CO2 displacement of oxygen \u2014 tests whether retrieval favors mechanism explanation over the word 'insecticide'."
+  },
+  {
+    "id": "eval_08",
+    "query": "What safety gear must be worn when applying pesticide treatment to seeds?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_022"
+    ],
+    "difficulty": "keyword-easy"
+  },
+  {
+    "id": "eval_09",
+    "query": "Why must treated seed be dyed an unusual color?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_022",
+      "fao_026"
+    ],
+    "difficulty": "keyword-easy",
+    "note": "To discourage accidental human/animal consumption."
+  },
+  {
+    "id": "eval_10",
+    "query": "How do you calculate how much insecticide dust to apply to 500 kg of maize?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_025",
+      "fao_026"
+    ],
+    "difficulty": "keyword-easy",
+    "note": "Dosage-rate calculation, admixture/sandwich method."
+  },
+  {
+    "id": "eval_11",
+    "query": "What construction choices protect a storage building from termites?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_031"
+    ],
+    "difficulty": "keyword-easy"
+  },
+  {
+    "id": "eval_12",
+    "query": "What are signs that rats or mice have infested a grain store?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_032",
+      "fao_033"
+    ],
+    "difficulty": "keyword-easy"
+  },
+  {
+    "id": "eval_13",
+    "query": "What's the danger of eating grain that has visible mould on it, even after cooking?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_016"
+    ],
+    "difficulty": "semantic-medium",
+    "note": "Aflatoxins survive cooking/heating \u2014 tests retrieval doesn't just match on 'mould' but on the heat-resistance claim."
+  },
+  {
+    "id": "eval_14",
+    "query": "When is the right time to harvest groundnuts so the kernels don't shrink?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_038"
+    ],
+    "difficulty": "keyword-easy"
+  },
+  {
+    "id": "eval_15",
+    "query": "Why shouldn't beans be threshed directly on bare ground or in a gunny bag?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_041",
+      "fao_042"
+    ],
+    "difficulty": "semantic-medium",
+    "note": "Cross-chunk boundary case (section split across fao_041/042) \u2014 good test of chunk-boundary recall loss."
+  },
+  {
+    "id": "eval_16",
+    "query": "What's the difference between a metal silo bin and a hermetic bag for storing grain?",
+    "lang": "en",
+    "expected_chunk_ids": [
+      "fao_050",
+      "fao_051"
+    ],
+    "difficulty": "semantic-medium",
+    "note": "Comparison question spanning two adjacent chunks."
+  },
+  {
+    "id": "eval_17",
+    "query": "Kulingana na mwongozo wa FAO, nifanye nini kuzuia unyevu usiharibu mazao ghalani?",
+    "lang": "sw",
+    "expected_chunk_ids": [
+      "fao_005",
+      "fao_006",
+      "fao_009"
+    ],
+    "difficulty": "semantic-hard",
+    "note": "Mandatory Prompt 2 (real text, corrected from earlier mistranslation). Moisture/humidity control in the granary."
+  },
+  {
+    "id": "eval_18",
+    "query": "Ni dalili gani zinazoonyesha panya wameingia kwenye ghala la nafaka?",
+    "lang": "sw",
+    "expected_chunk_ids": [
+      "fao_032",
+      "fao_033"
+    ],
+    "difficulty": "semantic-hard",
+    "note": "Swahili paraphrase of eval_12 (rodent infestation signs) \u2014 second cross-lingual data point besides the mandatory prompt, useful since n=1 isn't enough to judge the Swahili path."
+  }
+]

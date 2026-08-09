@@ -1,0 +1,37 @@
+{
+  "team_id": "YOUR_ACTUAL_TEAM_ID_FROM_ADTF_PORTAL",
+  "domain": "agriculture",
+  "language_scope": ["en", "sw"],
+  "african_alpha_claim": true,
+  "budget_laptop_claim": true,
+  "submitter": {
+    "name": "Ahmed Madi",
+    "email": "ahmed.120230077@ejust.edu.eg",
+    "github_handle": "Ahmed-fall"
+  },
+  "cross_disciplinary_pairing": {
+    "discipline": "agriculture",
+    "load_bearing": true,
+    "description": "Offline post-harvest advisory system for small-scale African farmers using the FAO grain storage manual, answering questions in English and Swahili with zero internet dependency."
+  },
+  "test_prompts": [
+    {
+      "prompt_id": "tp_001",
+      "prompt": "According to the FAO manual, what are the exact steps to seal a plastic storage container to prevent insect infestations?"
+    },
+    {
+      "prompt_id": "tp_002",
+      "prompt": "Kulingana na mwongozo wa FAO, nifanye nini kuzuia unyevu usiharibu mazao ghalani?"
+    }
+  ],
+  "model": {
+    "name": "Qwen2.5-3B-Instruct-Q4_K_M",
+    "runtime": "llama.cpp",
+    "quantization": "GGUF Q4_K_M",
+    "parameters_estimate": "3B",
+    "packaging": "binary_bundle"
+  },
+  "_runtime": {
+    "model_path": "model/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+  }
+}
