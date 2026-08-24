@@ -10,18 +10,11 @@
 #   1. Qwen2.5-1.5B-Instruct Q5_K_M (GGUF, generation)
 #   2. BAAI/bge-m3                  (multilingual embeddings, fp16 at runtime)
 #   3. facebook/nllb-200-distilled-600M (Swahili <-> English translation)
-#
-# Opt-in extras:
-#   WITH_3B=1 ./download_model.sh   -> also fetches Qwen2.5-3B-Instruct IQ4_XS
-#                                      (thermal A/B candidate for bench_candidates.sh;
-#                                      not referenced by the pipeline)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="$HERE/model"
-
-WITH_3B="${WITH_3B:-0}"
 
 fetch_file() {
   # fetch_file <url> <dest> — curl/wget fallback with atomic rename
@@ -94,23 +87,6 @@ tok.save_pretrained('$NLLB_DIR')
 model.save_pretrained('$NLLB_DIR')
 print('NLLB-200-distilled-600M saved.')
 "
-fi
-
-# ==========================================
-# 4. [OPT-IN] Thermal A/B candidate: Qwen2.5-3B-Instruct IQ4_XS
-#    Not loaded by the pipeline; benchmark it with scripts/bench_candidates.sh
-# ==========================================
-if [[ "$WITH_3B" == "1" ]]; then
-  LLM_3B_FILE="$MODEL_DIR/Qwen2.5-3B-Instruct-IQ4_XS.gguf"
-  LLM_3B_URL="https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-IQ4_XS.gguf"
-  if [[ -f "$LLM_3B_FILE" ]]; then
-    echo "3B IQ4_XS candidate already present at $LLM_3B_FILE — skipping download"
-  else
-    fetch_file "$LLM_3B_URL" "$LLM_3B_FILE"
-    echo "Done: $LLM_3B_FILE"
-  fi
-else
-  echo "Skipping 3B IQ4_XS candidate (set WITH_3B=1 to fetch it for thermal A/B)"
 fi
 
 echo "All requested models downloaded and ready for offline inference."

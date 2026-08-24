@@ -1,19 +1,19 @@
 """
-
 Implements Anthropic's Contextual Retrieval technique (Sept 2024):
-  For each chunk, call the LLM once with the full document text and ask it to
-  write 1-2 sentences explaining what this chunk is about in context.
+  For each chunk, call the LLM once with the document summary and ask it to
+  write 1-2 sentences situating the chunk within the manual.
   Prepend that context to the chunk text before indexing.
 
 The context prefix is used ONLY for BM25 tokenization and dense embedding.
 The original chunk text is preserved under the key "text" so pipeline.py
 builds prompts from clean content only — the model never sees the prefix.
 
+Offline batch tool (not part of judged inference). Reads
+data/knowledge_base/fao_chunks.json, writes fao_chunks_ctx.json; the enriched
+corpus shipped in the repo was produced with this script. Requires a GGUF
+model under model/ (auto-detected).
 
-    python src/indexer.py --chunks fao_chunks_ctx.json \
-                          --bm25   fao_bm25_ctx.pkl \
-                          --vectors fao_vectors_ctx.npy
-
+    python src/contextual_retrieval.py
 """
 
 import gc
