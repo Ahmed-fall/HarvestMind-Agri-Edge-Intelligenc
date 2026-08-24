@@ -29,9 +29,11 @@ HarvestMind answers agricultural storage questions in English and Swahili from a
 5. [Multilingual handling](#multilingual-handling)
 6. [Resource management](#resource-management)
 7. [Offline compliance](#offline-compliance)
-8. [Repository layout](#repository-layout)
-9. [Rebuilding the knowledge base](#rebuilding-the-knowledge-base)
-10. [Troubleshooting](#troubleshooting)
+8. [CPU-only execution](#cpu-only-execution)
+9. [Validation and profiling](#validation-and-profiling)
+10. [Repository layout](#repository-layout)
+11. [Rebuilding the knowledge base](#rebuilding-the-knowledge-base)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -183,6 +185,75 @@ The system is verified offline-compliant at runtime:
 - `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` are set before any `transformers` import, eliminating accidental cache-miss network attempts.
 - Indexes and the chunk corpus are committed to the repository; nothing is fetched or rebuilt at inference time.
 - After `download_model.sh` completes (pre-profiling), the system performs zero outbound requests under any code path.
+
+---
+
+## CPU-only execution
+
+Inference never touches a GPU, enforced at three independent layers:
+
+1. **Environment** — `CUDA_VISIBLE_DEVICES=""` is set before any third-party import in both entry points (`src/main.py`, `src/pipeline.py`), so even a CUDA build of PyTorch sees zero devices.
+2. **Explicit device pinning** — the embedder is constructed with `device="cpu"` (`src/retriever.py`); transformers translation models default to CPU and are never moved.
+3. **No offload** — llama.cpp is constructed with `n_gpu_layers=0` (`src/pipeline.py`), and the ADTC profiler itself invokes `llama-bench -ngl 0`.
+
+Verify on any machine (from inside the activated environment):
+
+```bash
+python - <<'PY'
+import os, sys
+sys.path.insert(0, "src")
+import main  # applies env hardening
+import torch
+assert torch.cuda.device_count() == 0
+print("CPU-only confirmed:", torch.cuda.device_count(), "CUDA devices visible")
+PY
+
+# While a query runs, this must list no python process:
+nvidia-smi   # errors out harmlessly on machines without NVIDIA drivers
+```
+
+Optional: to also shrink the install footprint, swap the CUDA-bundled torch wheel for the CPU build before `pip install -r requirements.txt`:
+
+```bash
+pip install torch==2.12.1 --index-url https://download.pytorch.org/whl/cpu
+```
+
+---
+
+## Validation and profiling
+
+The ADTC profiler is open source; install it directly from the official repository:
+
+```bash
+# Option A — install straight into the current environment
+pip install "git+https://github.com/Africa-Deep-Tech-Foundation/adtc-profiler.git"
+
+# Option B — clone for inspection, then install
+git clone https://github.com/Africa-Deep-Tech-Foundation/adtc-profiler.git
+pip install ./adtc-profiler
+adtc-profiler --help
+```
+
+Run a local smoke test after `bash download_model.sh`:
+
+```bash
+# Quick pass (~2 min) — throughput/memory/thermal only:
+adtc-profiler run \
+  --submission . \
+  --mode participant \
+  --output submission.json \
+  --skip-accuracy
+
+# Full pass — includes the arc_easy accuracy component (~10 min):
+adtc-profiler run \
+  --submission . \
+  --mode participant \
+  --output submission.json
+
+cat submission.json
+```
+
+A valid run produces `submission.json` with `"measured_on": "participant_laptop"` and `"params_match": true`. Profiler source, including thermal monitoring and scoring inputs: [github.com/Africa-Deep-Tech-Foundation/adtc-profiler](https://github.com/Africa-Deep-Tech-Foundation/adtc-profiler).
 
 ---
 

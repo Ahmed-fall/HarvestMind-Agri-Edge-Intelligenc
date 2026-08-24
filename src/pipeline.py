@@ -1,9 +1,11 @@
-# Offline hardening: every model is loaded from a local directory. Setting
-# these BEFORE any transformers/sentence-transformers import guarantees zero
-# outbound network attempts on an air-gapped judge machine.
+# Offline + CPU-only hardening: every model is loaded from a local directory,
+# and the process must never touch a GPU even on machines that have one.
+# Setting these BEFORE any transformers/sentence-transformers import guarantees
+# zero outbound network attempts and zero CUDA device visibility.
 import os
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 
 """
 Retrieval-augmented generation pipeline: retriever -> prompt -> llama.cpp.
@@ -262,6 +264,7 @@ def answer_query(query: str, verbose: bool = False) -> str:
             model_path=str(LLM_PATH),
             n_ctx=N_CTX,
             n_threads=_inference_threads(),
+            n_gpu_layers=0,  # CPU-only: explicit, never offload even if a GPU exists
             verbose=False,
         )
         _log_rss("after loading LLM", verbose)

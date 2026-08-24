@@ -10,9 +10,12 @@ Set HARVESTMIND_VERBOSE=1 to see retrieval/RSS diagnostics on stderr.
 """
 import os
 
-# Offline hardening before any third-party import can read these.
+# Offline + CPU-only hardening, applied before any third-party import can read
+# these: models come from local disk, and no code path may see a GPU even on
+# machines that have one.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 
 import sys
 

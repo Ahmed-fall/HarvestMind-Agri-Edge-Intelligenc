@@ -163,9 +163,14 @@ def load_retrieval_assets() -> Tuple[List[Dict], Any, np.ndarray]:
 
 
 def load_embedder() -> SentenceTransformer:
-    """Loads bge-m3 in fp16. Caller owns the lifecycle: load right before use,
-    `del` + gc.collect() right after, before the generation LLM loads."""
-    return SentenceTransformer(str(EMBED_PATH), model_kwargs={"torch_dtype": torch.float16})
+    """Loads bge-m3 in fp16 on CPU. Caller owns the lifecycle: load right
+    before use, `del` + gc.collect() right after, before the generation LLM
+    loads. device="cpu" is explicit — the embedder must never land on a GPU."""
+    return SentenceTransformer(
+        str(EMBED_PATH),
+        device="cpu",
+        model_kwargs={"torch_dtype": torch.float16},
+    )
 
 
 def run_retrieval_test():
