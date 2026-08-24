@@ -1,5 +1,10 @@
-fitz==0.0.1.dev2
-numpy==2.5.1
+# Generation runtime (llama.cpp bindings; the ADTC challenge runtime).
+# Pinned to 0.3.x — the profiler's accuracy adapter requires it.
+llama-cpp-python>=0.3.32,<0.4
+# PDF text extraction for src/chunker.py (imports as `fitz`).
+PyMuPDF>=1.28.0
+# Retrieval stack.
+numpy==2.4.6
 rank_bm25==0.2.2
 sentence_transformers==5.6.0
 torch==2.12.1

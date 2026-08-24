@@ -1,128 +1,91 @@
 #!/usr/bin/env bash
-# Download your model weight files.
+# Download all model weight files required by this submission.
 #
-# Rules:
-#   - Must be idempotent (safe to run multiple times).
-#   - Must download without any credentials (public URL only).
-#   - The output path must match `_runtime.model_path` in metadata.json.
+# Rules satisfied:
+#   - Idempotent: safe to run multiple times; existing files are skipped.
+#   - Credential-free: every URL is public Hugging Face.
+#   - Output paths match `_runtime.model_path` in metadata.json.
 #
-# Default invocation downloads exactly the locked submission stack:
-#   Qwen2.5-3B-Instruct Q4_K_M + multilingual-e5-small + ms-marco-MiniLM-L-6-v2
+# The default invocation downloads exactly the stack that src/ loads:
+#   1. Qwen2.5-1.5B-Instruct Q5_K_M (GGUF, generation)
+#   2. BAAI/bge-m3                  (multilingual embeddings, fp16 at runtime)
+#   3. facebook/nllb-200-distilled-600M (Swahili <-> English translation)
 #
-# CHANGED: two extra models are now available behind opt-in env flags, for the
-# EMB-3 and SW-B experiments your own plan scopes in Table 6C / Section 3D but
-# that haven't been run yet:
-#   WITH_BGE_M3=1   ./download_model.sh   -> also fetches BAAI/bge-m3
-#   WITH_NLLB=1     ./download_model.sh   -> also fetches NLLB-200-distilled-600M
-# Neither is touched by the default run, so this stays idempotent and correct
-# for final submission. Only fold one into the real pipeline (indexer.py /
-# retriever.py model_path, metadata.json) once you've measured it beats the
-# current stack on eval_runner.py -- don't ship an untested model swap.
+# Opt-in extras:
+#   WITH_3B=1 ./download_model.sh   -> also fetches Qwen2.5-3B-Instruct IQ4_XS
+#                                      (thermal A/B candidate for bench_candidates.sh;
+#                                      not referenced by the pipeline)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_DIR="$HERE/model"
 
-WITH_BGE_M3="${WITH_BGE_M3:-0}"
-WITH_NLLB="${WITH_NLLB:-0}"
+WITH_3B="${WITH_3B:-0}"
 
-# ── 1. LLM Configuration ───────────────────────────────────────────────────────
-LLM_MODEL_FILE="$MODEL_DIR/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-LLM_MODEL_URL="https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-
-# ── 2. Retrieval Models Configuration ──────────────────────────────────────────
-EMBED_DIR="$MODEL_DIR/embeddings/multilingual-e5-small"
-RERANKER_DIR="$MODEL_DIR/reranker/ms-marco-MiniLM-L-6-v2"
-
-# ── 3. Experimental / opt-in models ────────────────────────────────────────────
-BGE_M3_DIR="$MODEL_DIR/embeddings/bge-m3"
-NLLB_DIR="$MODEL_DIR/translation/nllb-200-distilled-600M"
-# ───────────────────────────────────────────────────────────────────────────────
-
-mkdir -p "$MODEL_DIR"
-
-# ==========================================
-# 1. Download LLM Weights
-# ==========================================
-if [[ -f "$LLM_MODEL_FILE" ]]; then
-  echo "LLM already present at $LLM_MODEL_FILE — skipping download"
-else
-  echo "Downloading $LLM_MODEL_URL → $LLM_MODEL_FILE (~2.2 GB)…"
-
-  # Robust fallback between curl and wget
+fetch_file() {
+  # fetch_file <url> <dest> — curl/wget fallback with atomic rename
+  local url="$1" dest="$2"
+  echo "Downloading $url → $dest …"
   if command -v curl > /dev/null 2>&1; then
-    curl -L --fail --progress-bar -o "$LLM_MODEL_FILE.partial" "$LLM_MODEL_URL"
+    curl -L --fail --progress-bar -o "$dest.partial" "$url"
   elif command -v wget > /dev/null 2>&1; then
-    wget --show-progress -O "$LLM_MODEL_FILE.partial" "$LLM_MODEL_URL"
+    wget --show-progress -O "$dest.partial" "$url"
   else
     echo "error: neither curl nor wget found" >&2
     exit 1
   fi
+  mv "$dest.partial" "$dest"
+}
 
-  # Atomic move to prevent corrupted partial downloads from being read
-  mv "$LLM_MODEL_FILE.partial" "$LLM_MODEL_FILE"
+run_python() {
+  if command -v python > /dev/null 2>&1; then
+    python -c "$1"
+  else
+    python3 -c "$1"
+  fi
+}
+
+mkdir -p "$MODEL_DIR"
+
+# ==========================================
+# 1. Generation LLM (Qwen2.5-1.5B-Instruct, GGUF Q5_K_M)
+# ==========================================
+LLM_MODEL_FILE="$MODEL_DIR/Qwen2.5-1.5B-Instruct-Q5_K_M.gguf"
+LLM_MODEL_URL="https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q5_K_M.gguf"
+
+if [[ -f "$LLM_MODEL_FILE" ]]; then
+  echo "LLM already present at $LLM_MODEL_FILE — skipping download"
+else
+  fetch_file "$LLM_MODEL_URL" "$LLM_MODEL_FILE"
   echo "Done: $LLM_MODEL_FILE"
 fi
 
 # ==========================================
-# 2. Download Embedding Model (multilingual-e5-small)
+# 2. Embedding model (BAAI/bge-m3) — used by retriever.py / indexer.py
 # ==========================================
+EMBED_DIR="$MODEL_DIR/embeddings/bge-m3"
 if [[ -d "$EMBED_DIR" ]]; then
   echo "Embedding model already present at $EMBED_DIR — skipping download"
 else
-  echo "Downloading Embedding model to $EMBED_DIR…"
-  python -c "
-from sentence_transformers import SentenceTransformer
-m = SentenceTransformer('intfloat/multilingual-e5-small')
-m.save('$EMBED_DIR')
-print('Embedding model saved.')
-"
-fi
-
-# ==========================================
-# 3. Download Reranker Model (ms-marco-MiniLM-L-6-v2)
-# ==========================================
-if [[ -d "$RERANKER_DIR" ]]; then
-  echo "Reranker model already present at $RERANKER_DIR — skipping download"
-else
-  echo "Downloading Reranker model to $RERANKER_DIR…"
-  python -c "
-from sentence_transformers import CrossEncoder
-m = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-m.save('$RERANKER_DIR')
-print('Reranker saved.')
-"
-fi
-
-# ==========================================
-# 4. [OPT-IN] Download BAAI/bge-m3 -- for EMB-3 experiment (Table 6C)
-# ==========================================
-if [[ "$WITH_BGE_M3" == "1" ]]; then
-  if [[ -d "$BGE_M3_DIR" ]]; then
-    echo "bge-m3 already present at $BGE_M3_DIR — skipping download"
-  else
-    echo "Downloading BAAI/bge-m3 to $BGE_M3_DIR (~1.2 GB)…"
-    python -c "
+  echo "Downloading embedding model to $EMBED_DIR (~2.3 GB on disk)…"
+  run_python "
 from sentence_transformers import SentenceTransformer
 m = SentenceTransformer('BAAI/bge-m3')
-m.save('$BGE_M3_DIR')
+m.save('$EMBED_DIR')
 print('bge-m3 saved.')
 "
-  fi
-else
-  echo "Skipping bge-m3 (set WITH_BGE_M3=1 to fetch it for the EMB-3 experiment)"
 fi
 
 # ==========================================
-# 5. [OPT-IN] Download NLLB-200-distilled-600M -- for SW-B experiment (Section 3D)
+# 3. Translation model (NLLB-200-distilled-600M) — used by translator.py
 # ==========================================
-if [[ "$WITH_NLLB" == "1" ]]; then
-  if [[ -d "$NLLB_DIR" ]]; then
-    echo "NLLB-200-distilled-600M already present at $NLLB_DIR — skipping download"
-  else
-    echo "Downloading facebook/nllb-200-distilled-600M to $NLLB_DIR (~2.5 GB fp32 on disk)…"
-    python -c "
+NLLB_DIR="$MODEL_DIR/translation/nllb-200-distilled-600M"
+if [[ -d "$NLLB_DIR" ]]; then
+  echo "Translation model already present at $NLLB_DIR — skipping download"
+else
+  echo "Downloading NLLB-200-distilled-600M to $NLLB_DIR (~2.4 GB on disk)…"
+  run_python "
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 name = 'facebook/nllb-200-distilled-600M'
 tok = AutoTokenizer.from_pretrained(name)
@@ -131,9 +94,23 @@ tok.save_pretrained('$NLLB_DIR')
 model.save_pretrained('$NLLB_DIR')
 print('NLLB-200-distilled-600M saved.')
 "
-  fi
-else
-  echo "Skipping NLLB (set WITH_NLLB=1 to fetch it for the SW-B experiment)"
 fi
 
-echo "All requested models successfully downloaded and ready for offline inference."
+# ==========================================
+# 4. [OPT-IN] Thermal A/B candidate: Qwen2.5-3B-Instruct IQ4_XS
+#    Not loaded by the pipeline; benchmark it with scripts/bench_candidates.sh
+# ==========================================
+if [[ "$WITH_3B" == "1" ]]; then
+  LLM_3B_FILE="$MODEL_DIR/Qwen2.5-3B-Instruct-IQ4_XS.gguf"
+  LLM_3B_URL="https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-IQ4_XS.gguf"
+  if [[ -f "$LLM_3B_FILE" ]]; then
+    echo "3B IQ4_XS candidate already present at $LLM_3B_FILE — skipping download"
+  else
+    fetch_file "$LLM_3B_URL" "$LLM_3B_FILE"
+    echo "Done: $LLM_3B_FILE"
+  fi
+else
+  echo "Skipping 3B IQ4_XS candidate (set WITH_3B=1 to fetch it for thermal A/B)"
+fi
+
+echo "All requested models downloaded and ready for offline inference."

@@ -18,6 +18,7 @@ builds prompts from clean content only — the model never sees the prefix.
 
 import gc
 import json
+import re
 import sys
 import time
 import logging
@@ -35,7 +36,28 @@ logger = logging.getLogger("ContextualRetrieval")
 SRC_DIR     = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
 KB_DIR      = PROJECT_ROOT / "data" / "knowledge_base"
-LLM_PATH    = PROJECT_ROOT / "model" / "Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+
+
+def _find_llm() -> Path:
+    """Offline batch tool: use whatever instruct GGUF is available (prefers the
+    pipeline's shipped model). Never run on judge machines."""
+    preferred = [
+        PROJECT_ROOT / "model" / "Qwen2.5-1.5B-Instruct-Q5_K_M.gguf",
+        PROJECT_ROOT / "model" / "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+        PROJECT_ROOT / "model" / "Qwen2.5-3B-Instruct-IQ4_XS.gguf",
+    ]
+    for p in preferred:
+        if p.exists():
+            return p
+    ggufs = sorted((PROJECT_ROOT / "model").glob("*.gguf"))
+    if ggufs:
+        return ggufs[0]
+    raise FileNotFoundError(
+        f"No .gguf model under {PROJECT_ROOT / 'model'}. Run download_model.sh first."
+    )
+
+
+LLM_PATH = None  # resolved lazily in main(); see _find_llm()
 
 INPUT_CHUNKS  = KB_DIR / "fao_chunks.json"
 OUTPUT_CHUNKS = KB_DIR / "fao_chunks_ctx.json"
@@ -93,10 +115,7 @@ def build_context_prompt(section: str, chunk_text: str) -> str:
 def clean_context_output(raw: str) -> str:
     """Strip any ChatML tokens or trailing whitespace the model may emit."""
     raw = raw.strip()
-    # Remove any im_end or im_start tokens that leaked into output
     raw = raw.replace("<|im_end|>", "").replace("<|im_start|>", "")
-    # Collapse multiple spaces/newlines
-    import re
     raw = re.sub(r'\s+', ' ', raw).strip()
     return raw
 
@@ -124,16 +143,19 @@ def generate_context(llm: Llama, section: str, chunk_text: str) -> str:
     return clean_context_output(raw["choices"][0]["text"])
 
 def main():
+    global LLM_PATH
     # ── Validate inputs ───────────────────────────────────────────────────────
     if not INPUT_CHUNKS.exists():
         logger.error(f"Input chunks not found: {INPUT_CHUNKS}")
         logger.error("Run chunker.py first.")
         sys.exit(1)
 
-    if not LLM_PATH.exists():
-        logger.error(f"LLM not found: {LLM_PATH}")
-        logger.error("Run download_model.sh first.")
+    try:
+        LLM_PATH = _find_llm()
+    except FileNotFoundError as e:
+        logger.error(str(e))
         sys.exit(1)
+    logger.info(f"Using LLM: {LLM_PATH.name}")
 
     # ── Load chunks ───────────────────────────────────────────────────────────
     with open(INPUT_CHUNKS, encoding="utf-8") as f:
@@ -141,16 +163,20 @@ def main():
     logger.info(f"Loaded {len(chunks)} chunks from {INPUT_CHUNKS}")
 
     # ── Check for resume (if output already exists, skip done chunks) ─────────
+    # Dedupe by chunk_id (keeping the last occurrence) so an interrupted run
+    # that retried a failed chunk can never leave duplicate entries behind.
     done_ids: set = set()
     enriched: list = []
     if OUTPUT_CHUNKS.exists():
         with open(OUTPUT_CHUNKS, encoding="utf-8") as f:
-            enriched = json.load(f)
-        done_ids = {c["chunk_id"] for c in enriched if c.get("context_prefix")}
+            prior = json.load(f)
+        deduped: dict = {}
+        for c in prior:
+            deduped[c["chunk_id"]] = c
+        enriched = list(deduped.values())
+        done_ids = {cid for cid, c in deduped.items() if c.get("context_prefix")}
         logger.info(f"Resuming: {len(done_ids)} chunks already processed, "
                     f"{len(chunks) - len(done_ids)} remaining.")
-    else:
-        enriched = []
 
     remaining = [c for c in chunks if c["chunk_id"] not in done_ids]
     if not remaining:
@@ -184,16 +210,19 @@ def main():
             ctx = ""
 
         # Build enriched chunk: preserve all original fields, add context_prefix
-        # and indexed_text (what BM25/dense will see).
+        # and indexed_text (what BM25/dense will see). Replace any prior entry
+        # with the same id (e.g. an earlier failed attempt) instead of appending.
         enriched_chunk = {
             **chunk,
             "context_prefix": ctx,
-            # indexed_text = what goes into BM25 tokenizer and sentence-transformer.
-            # pipeline.py builds prompts from chunk["text"] only — it never reads
-            # indexed_text — so the model never sees the prefix at generation time.
             "indexed_text": f"{ctx} {text}".strip() if ctx else text,
         }
-        enriched.append(enriched_chunk)
+        for pos, existing in enumerate(enriched):
+            if existing["chunk_id"] == chunk_id:
+                enriched[pos] = enriched_chunk
+                break
+        else:
+            enriched.append(enriched_chunk)
 
         elapsed = time.time() - t0
         avg_sec = elapsed / i

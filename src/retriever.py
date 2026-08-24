@@ -1,69 +1,88 @@
+"""Production retrieval: hybrid BM25 + dense RRF with section-diversity capping
+for English queries; pure dense for Swahili queries (BM25 contributes only
+noise against non-English tokens -- measured during development).
+
+Memory contract: load_retrieval_assets() and load_embedder() are separate on
+purpose. The caller loads assets once (small, stays resident), embeds +
+retrieves, then releases the embedder BEFORE the generation LLM loads. The
+embedder and the LLM must never be co-resident on the 8 GB target profile.
+"""
 import json
 import pickle
 import re
 import gc
-import sys
-import torch
-import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
+
+import torch
+import numpy as np
 from sentence_transformers import SentenceTransformer
-# CHANGED: CrossEncoder import removed from the live path. eval_runner.py showed the
-# ms-marco-MiniLM-L-6-v2 reranker underperforming plain hybrid RRF in every run tested
-# (3 independent runs: e5-small baseline, bge-m3 fp32, bge-m3 fp16) -- it specifically
-# broke the plastic-container case (fao_054) every single time despite BM25, dense, and
-# RRF all surfacing the correct chunk upstream. Dropping it also helps Sperf (one fewer
-# model load + forward pass) and Seff (no reranker RAM). If you re-test this decision
-# later, `from sentence_transformers import CrossEncoder` is the only import to restore.
+
+from textproc import fast_tokenize, base_section, indexed_text
 
 SRC_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SRC_DIR.parent
 KB_DIR = PROJECT_ROOT / "data" / "knowledge_base"
 VECTOR_DIR = PROJECT_ROOT / "data" / "vector_store"
-# CHANGED: committed to bge-m3 -- fixed both Swahili misses and the plastic-container
-# case, with zero recall cost from fp16 quantization. See REPORT.md Table 6C.
 EMBED_PATH = PROJECT_ROOT / "model" / "embeddings" / "bge-m3"
 
-FINAL_K = 5            # CHANGED: 4 -> 5. The Swahili moisture query showed FINAL_K=4 +
-                        # section-diversity capping was slightly too tight -- it surfaced
-                        # a tangential chunk (fao_009) but not the more directly relevant
-                        # fao_005/fao_006. Cheap to widen now that dropping the reranker
-                        # freed up RAM/latency headroom.
-MAX_PER_SECTION = 2
+FINAL_K = 5            # context chunks handed to the generator
+MAX_PER_SECTION = 2    # diversity cap per base section inside FINAL_K
 
 
 class LanguageDetector:
-    # Real mandatory Prompt 2 keywords (moisture/granary), corrected from the earlier
-    # plastic-container mistranslation that was being tested against.
-    SWAHILI_KEYWORDS = {
-        "kulingana", "na", "mwongozo", "fao", "nifanye", "nini",
-        "kuzuia", "unyevu", "usiharibu", "mazao", "ghalani"
+    """Weighted lexical Swahili detector.
+
+    Two tiers:
+      STRONG   -- unambiguous Swahili content/question words (2 points each).
+      CONCORD  -- grammatical function words/concords that cannot occur as
+                  standalone English words (1 point each).
+    A query is Swahili when the total score reaches 2, i.e. one clear content
+    word or two function words. This generalizes far better than requiring
+    matches from a fixed phrase list: hidden test prompts phrased with
+    vocabulary never seen here still route to translation.
+    """
+
+    _STRONG = {
+        # mandatory-prompt domain
+        "kulingana", "mwongozo", "nifanye", "nini", "kuzuia", "unyevu",
+        "usiharibu", "mazao", "ghalani", "ghala",
+        # question words
+        "nani", "wapi", "lini", "gani", "ngapi", "vipi", "je",
+        # capability/need verbs
+        "ninaweza", "ninawezaje", "wezaje", "unahitaji", "nahitaji",
+        "tunahitaji", "ninataka", "unitafsiri",
+        # agriculture / storage domain
+        "kuhifadhi", "hifadhi", "chakula", "kilimo", "shamba", "mkulima",
+        "wakulima", "mbeu", "mbega", "gunia", "wadudu", "kipanya", "panya",
+        "dawa",
+        "vyakula", "tunza", "kutunza", "kupoteza", "kupunguza", "kuongeza",
+        "joto", "baridi", "maji", "hewa", "unyevunyevu", "kuuka", "kavu",
+        "kukauka", "mba", "mdudu", "kunguru", "ndege",
     }
 
-    @staticmethod
-    def is_swahili(text: str) -> bool:
+    _CONCORD = {
+        "kwa", "wa", "ya", "cha", "vya", "za", "la", "ka", "na", "au",
+        "katika", "kwenye", "hii", "hiyo", "ile", "hapa", "pale", "sasa",
+        "pia", "sana", "lakini", "ila", "kama", "hivyo", "kwamba", "ili",
+        "baada", "kabla", "kati", "yangu", "yako", "yake", "wetu", "wangu",
+        "una", "huna", "tuna", "sina", "hatuna", "bila", "mpaka", "hadi",
+        "tu",
+    }
+
+    @classmethod
+    def score(cls, text: str) -> int:
         tokens = set(re.findall(r'\w+', text.lower()))
-        return len(tokens.intersection(LanguageDetector.SWAHILI_KEYWORDS)) >= 2
+        return 2 * len(tokens & cls._STRONG) + len(tokens & cls._CONCORD)
+
+    @classmethod
+    def is_swahili(cls, text: str) -> bool:
+        return cls.score(text) >= 2
 
 
-def simple_stem(tok: str) -> str:
-    # Must match indexer.py's TextProcessor.simple_stem exactly -- BM25 query
-    # tokenization and index tokenization have to agree or matches silently break.
-    if len(tok) > 4 and tok.endswith('ies'):
-        return tok[:-3] + 'y'
-    if len(tok) > 3 and tok.endswith('es') and not tok.endswith('ses'):
-        return tok[:-2]
-    if len(tok) > 3 and tok.endswith('s') and not tok.endswith('ss'):
-        return tok[:-1]
-    return tok
-
-
-def fast_tokenize(text: str) -> List[str]:
-    return [simple_stem(w) for w in re.findall(r'\w+', text.lower())]
-
-
-def base_section(section: str) -> str:
-    return re.sub(r'\s*\(Part \d+\)\s*$', '', section).strip()
+def normalize_vec(v: np.ndarray) -> np.ndarray:
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else v
 
 
 def select_diverse_top_k(ranked_indices: List[int], chunks: List[Dict], k: int, max_per_section: int) -> List[int]:
@@ -81,11 +100,6 @@ def select_diverse_top_k(ranked_indices: List[int], chunks: List[Dict], k: int, 
     return selected
 
 
-def normalize_vec(v: np.ndarray) -> np.ndarray:
-    n = np.linalg.norm(v)
-    return v / n if n > 0 else v
-
-
 def retrieve(
     query: str,
     chunks: List[Dict],
@@ -94,7 +108,12 @@ def retrieve(
     embedder: SentenceTransformer,
     query_language: Optional[str] = None,
 ) -> List[Dict]:
-    """Production retrieval entry point. Returns top FINAL_K chunks, section-diverse."""
+    """Returns top FINAL_K chunks, section-diverse.
+
+    English: reciprocal-rank fusion of BM25 top-20 and dense top-20.
+    Swahili: pure dense ranking (multilingual embeddings carry the signal;
+    BM25 on Swahili morphemes against an English corpus is noise).
+    """
     is_sw = query_language == "sw" or (
         query_language is None and LanguageDetector.is_swahili(query)
     )
@@ -103,9 +122,6 @@ def retrieve(
     dense_ranked = np.argsort(dense_scores)[::-1].tolist()
 
     if is_sw:
-        # Pure dense, no BM25: validated by eval_runner.py -- hybrid RRF actively
-        # hurt Swahili recall here because BM25 contributes noise, not signal,
-        # against non-English query tokens, and displaces a good dense ranking.
         top_indices = select_diverse_top_k(dense_ranked, chunks, FINAL_K, MAX_PER_SECTION)
     else:
         bm25_ranks = np.argsort(bm25.get_scores(fast_tokenize(query)))[::-1][:20].tolist()
@@ -123,8 +139,8 @@ def retrieve(
 
 
 def load_retrieval_assets() -> Tuple[List[Dict], Any, np.ndarray]:
-    """Loads chunks + BM25 index + normalized dense vectors. Cheap, keep resident in RAM
-    for the life of the process -- this is not the expensive part of the pipeline."""
+    """Loads chunks + BM25 index + L2-normalized dense vectors. Small and cheap:
+    these stay resident for the life of the process."""
     chunks_path = KB_DIR / "fao_chunks.json"
     bm25_path = VECTOR_DIR / "fao_bm25.pkl"
     vectors_path = VECTOR_DIR / "fao_vectors.npy"
@@ -147,10 +163,8 @@ def load_retrieval_assets() -> Tuple[List[Dict], Any, np.ndarray]:
 
 
 def load_embedder() -> SentenceTransformer:
-    """Loads bge-m3 in fp16. Caller owns the lifecycle -- load right before use,
-    `del` + `gc.collect()` right after, per the memory-hygiene requirement (this is
-    the expensive, large-RAM part of retrieval and should not stay resident once
-    the LLM needs to load)."""
+    """Loads bge-m3 in fp16. Caller owns the lifecycle: load right before use,
+    `del` + gc.collect() right after, before the generation LLM loads."""
     return SentenceTransformer(str(EMBED_PATH), model_kwargs={"torch_dtype": torch.float16})
 
 

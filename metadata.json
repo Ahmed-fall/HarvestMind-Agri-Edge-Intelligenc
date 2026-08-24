@@ -1,5 +1,5 @@
 {
-  "team_id": "YOUR_ACTUAL_TEAM_ID_FROM_ADTF_PORTAL",
+  "team_id": "harvestmind-agri-edge-intelligence",
   "domain": "agriculture",
   "language_scope": ["en", "sw"],
   "african_alpha_claim": true,
@@ -25,13 +25,13 @@
     }
   ],
   "model": {
-    "name": "Qwen2.5-3B-Instruct-Q4_K_M",
+    "name": "Qwen2.5-1.5B-Instruct-Q5_K_M",
     "runtime": "llama.cpp",
-    "quantization": "GGUF Q4_K_M",
-    "parameters_estimate": "3B",
+    "quantization": "GGUF Q5_K_M",
+    "parameters_estimate": "1.5B",
     "packaging": "binary_bundle"
   },
   "_runtime": {
-    "model_path": "model/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+    "model_path": "model/Qwen2.5-1.5B-Instruct-Q5_K_M.gguf"
   }
 }
