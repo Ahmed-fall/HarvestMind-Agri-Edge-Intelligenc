@@ -156,6 +156,34 @@ Proxy/reference machine: i7-10700 desktop, 7.5 GB RAM.
 | Core temp peak | — | 86 °C (throttled flag set) |
 | arc_easy acc_norm (n=50) | — | 0.74 |
 
+**Participant laptop, eval-representative (i5-12500H, Arch Linux, 15.3 GB RAM,
+GPU unused):** `submission_i5_12500H.json`, run at commit `4748a8819e31`.
+
+| Metric | i5-12500H (Arch Linux) |
+|---|---|
+| Generation throughput | 13.16 t/s |
+| First-token latency (512-tok prompt) | 22,362 ms |
+| Peak RSS | 1242 MB |
+| Core temp peak / throttled | 43 °C / false |
+| arc_easy acc_norm (n=50) | 0.74 |
+
+Under the challenge scoring model this yields `S_perf = 100 × 13.16/15.0 ≈
+87.7` (**26.3 weighted pts**) and `S_eff = 100 × (7 − 1.213)/7 ≈ 82.7`
+(**16.5 weighted pts**), with no thermal penalty.
+
+**Known measurement caveat (Arch distribution build).** This machine's
+`llama-bench` comes from Arch's `llama-cpp` package, which ships an
+asserts-enabled build against a generic `ggml-cpu` backend without native SIMD
+dispatch (`warning: asserts enabled, performance may be affected`). Prompt
+processing is disproportionately affected (~23 tok/s over the 512-token
+prompt), depressing both first-token latency and generation rate below the
+16–18 t/s projection above; utilization (`cpu_percent_p99` = 49.2 %) and the
+43 °C peak confirm the CPU was never saturated or thermally constrained. A
+source-built Release binary with `GGML_NATIVE=ON` on identical hardware is
+expected to recover substantially higher throughput at the same thermals;
+the figures here are therefore a conservative floor for i5-class hardware,
+not a property of the submission.
+
 **Baseline configuration (Qwen2.5-3B-Instruct Q4_K_M):**
 
 | Machine | Throughput | Peak RSS | Temp | arc_easy |
